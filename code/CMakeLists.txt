@@ -217,6 +217,8 @@ SOURCE_GROUP(Common FILES ${Common_SRCS})
 SET( CApi_SRCS
   CApi/CInterfaceIOWrapper.cpp
   CApi/CInterfaceIOWrapper.h
+  CApi/vv_extensions.cpp
+  CApi/vv_extensions.h
 )
 SOURCE_GROUP(CApi FILES ${CApi_SRCS})
 
