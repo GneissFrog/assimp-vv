@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
@@ -19,10 +21,27 @@ static aiBone* vv_get_bone(const aiScene *scene, unsigned int mi, unsigned int b
     return mesh->mBones[bi];
 }
 
+static aiNode* vv_find_node_recursive(aiNode *node, const std::string &name) {
+    if (!node) return nullptr;
+    if (std::string(node->mName.C_Str()) == name) return node;
+    for (unsigned int i = 0; i < node->mNumChildren; ++i) {
+        aiNode *found = vv_find_node_recursive(node->mChildren[i], name);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
 static aiNode* vv_find_node(aiNode *root, const char *path) {
     if (!root || !path || !*path) return root;
 
     std::string p(path);
+
+    /* Bare name (no slashes) — recursive DFS through entire tree */
+    if (p.find('/') == std::string::npos) {
+        return vv_find_node_recursive(root, p);
+    }
+
+    /* Slash-separated path — walk from root one segment at a time */
     aiNode *cur = root;
     size_t pos = 0;
 
@@ -81,6 +100,14 @@ void vvGetBoneOffsetMatrix(const aiScene *scene, unsigned int mi, unsigned int b
     const aiBone *bone = vv_get_bone(scene, mi, bi);
     if (!bone || !out16) return;
     std::memcpy(out16, &bone->mOffsetMatrix, 16 * sizeof(float));
+}
+
+int vvSetBoneOffsetMatrix(aiScene *scene, unsigned int mi, unsigned int bi,
+                          const float *in16) {
+    aiBone *bone = vv_get_bone(scene, mi, bi);
+    if (!bone || !in16) return -1;
+    std::memcpy(&bone->mOffsetMatrix, in16, 16 * sizeof(float));
+    return 0;
 }
 
 /* ── Bone weight write ────────────────────────────────────────── */
@@ -364,4 +391,159 @@ int vvAddBlendShape(aiScene *scene, unsigned int mi, const char *name,
     mesh->mNumAnimMeshes = newCount;
 
     return (int)(newCount - 1);
+}
+
+/* ── Mesh subset extraction ──────────────────────────────────── */
+
+int vvExtractMeshSubset(aiScene *scene, unsigned int mi,
+                        const unsigned int *keepVids, unsigned int numKeep) {
+    if (!scene || mi >= scene->mNumMeshes || !keepVids || numKeep == 0)
+        return -1;
+
+    aiMesh *mesh = scene->mMeshes[mi];
+    if (!mesh || !mesh->mVertices || !mesh->mFaces || mesh->mNumVertices == 0)
+        return -1;
+
+    // 1. Build keep set, clamping to valid range
+    std::unordered_set<unsigned int> keepSet;
+    keepSet.reserve(numKeep);
+    for (unsigned int i = 0; i < numKeep; ++i) {
+        if (keepVids[i] < mesh->mNumVertices)
+            keepSet.insert(keepVids[i]);
+    }
+    if (keepSet.empty()) return -1;
+
+    // 2. Find faces where ALL vertices are in the keep set
+    std::vector<unsigned int> keptFaceIdx;
+    keptFaceIdx.reserve(mesh->mNumFaces);
+    for (unsigned int fi = 0; fi < mesh->mNumFaces; ++fi) {
+        const aiFace &face = mesh->mFaces[fi];
+        if (face.mNumIndices == 0 || !face.mIndices) continue;
+        bool allIn = true;
+        for (unsigned int j = 0; j < face.mNumIndices; ++j) {
+            if (keepSet.find(face.mIndices[j]) == keepSet.end()) {
+                allIn = false;
+                break;
+            }
+        }
+        if (allIn) keptFaceIdx.push_back(fi);
+    }
+
+    if (keptFaceIdx.empty()) return -1;
+
+    // 3. Collect actual used vertices from kept faces (sorted)
+    std::unordered_set<unsigned int> usedSet;
+    for (unsigned int fi : keptFaceIdx) {
+        const aiFace &face = mesh->mFaces[fi];
+        for (unsigned int j = 0; j < face.mNumIndices; ++j)
+            usedSet.insert(face.mIndices[j]);
+    }
+    std::vector<unsigned int> usedVerts(usedSet.begin(), usedSet.end());
+    std::sort(usedVerts.begin(), usedVerts.end());
+
+    // 4. Build old -> new vertex remap
+    unsigned int newNV = (unsigned int)usedVerts.size();
+    std::unordered_map<unsigned int, unsigned int> remap;
+    remap.reserve(newNV);
+    for (unsigned int i = 0; i < newNV; ++i)
+        remap[usedVerts[i]] = i;
+
+    // 5. Rebuild per-vertex arrays
+    // NOTE: We intentionally do NOT free the old arrays.  Assimp's
+    // scene destructor (aiReleaseImport) will clean up the entire
+    // allocation block.  Calling delete[] on Assimp-allocated memory
+    // crashes because it may use a different allocator.
+
+    // Positions
+    aiVector3D *newPos = new aiVector3D[newNV];
+    for (unsigned int i = 0; i < newNV; ++i)
+        newPos[i] = mesh->mVertices[usedVerts[i]];
+    mesh->mVertices = newPos;
+
+    // Normals
+    if (mesh->mNormals) {
+        aiVector3D *buf = new aiVector3D[newNV];
+        for (unsigned int i = 0; i < newNV; ++i)
+            buf[i] = mesh->mNormals[usedVerts[i]];
+        mesh->mNormals = buf;
+    }
+
+    // Tangents
+    if (mesh->mTangents) {
+        aiVector3D *buf = new aiVector3D[newNV];
+        for (unsigned int i = 0; i < newNV; ++i)
+            buf[i] = mesh->mTangents[usedVerts[i]];
+        mesh->mTangents = buf;
+    }
+
+    // Bitangents
+    if (mesh->mBitangents) {
+        aiVector3D *buf = new aiVector3D[newNV];
+        for (unsigned int i = 0; i < newNV; ++i)
+            buf[i] = mesh->mBitangents[usedVerts[i]];
+        mesh->mBitangents = buf;
+    }
+
+    // Texture coordinates (all channels)
+    for (int ch = 0; ch < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++ch) {
+        if (mesh->mTextureCoords[ch]) {
+            aiVector3D *buf = new aiVector3D[newNV];
+            for (unsigned int i = 0; i < newNV; ++i)
+                buf[i] = mesh->mTextureCoords[ch][usedVerts[i]];
+            mesh->mTextureCoords[ch] = buf;
+        }
+    }
+
+    // Vertex colors (all channels)
+    for (int ch = 0; ch < AI_MAX_NUMBER_OF_COLOR_SETS; ++ch) {
+        if (mesh->mColors[ch]) {
+            aiColor4D *buf = new aiColor4D[newNV];
+            for (unsigned int i = 0; i < newNV; ++i)
+                buf[i] = mesh->mColors[ch][usedVerts[i]];
+            mesh->mColors[ch] = buf;
+        }
+    }
+
+    // 6. Rebuild faces with remapped indices
+    unsigned int newNF = (unsigned int)keptFaceIdx.size();
+    aiFace *newFaces = new aiFace[newNF];
+    for (unsigned int i = 0; i < newNF; ++i) {
+        const aiFace &old = mesh->mFaces[keptFaceIdx[i]];
+        newFaces[i].mNumIndices = old.mNumIndices;
+        newFaces[i].mIndices = new unsigned int[old.mNumIndices];
+        for (unsigned int j = 0; j < old.mNumIndices; ++j)
+            newFaces[i].mIndices[j] = remap[old.mIndices[j]];
+    }
+    mesh->mFaces = newFaces;
+
+    // 7. Remap bone weights
+    for (unsigned int bi = 0; bi < mesh->mNumBones; ++bi) {
+        aiBone *bone = mesh->mBones[bi];
+        std::vector<aiVertexWeight> kept;
+        kept.reserve(bone->mNumWeights);
+        for (unsigned int wi = 0; wi < bone->mNumWeights; ++wi) {
+            auto it = remap.find(bone->mWeights[wi].mVertexId);
+            if (it != remap.end()) {
+                aiVertexWeight w;
+                w.mVertexId = it->second;
+                w.mWeight = bone->mWeights[wi].mWeight;
+                kept.push_back(w);
+            }
+        }
+        delete[] bone->mWeights;
+        bone->mNumWeights = (unsigned int)kept.size();
+        if (!kept.empty()) {
+            bone->mWeights = new aiVertexWeight[kept.size()];
+            std::memcpy(bone->mWeights, kept.data(),
+                        kept.size() * sizeof(aiVertexWeight));
+        } else {
+            bone->mWeights = nullptr;
+        }
+    }
+
+    // 8. Update counts
+    mesh->mNumVertices = newNV;
+    mesh->mNumFaces = newNF;
+
+    return 0;
 }

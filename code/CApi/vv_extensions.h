@@ -56,6 +56,12 @@ ASSIMP_API void vvGetBoneOffsetMatrix(const C_STRUCT aiScene *scene,
                                       unsigned int boneIndex,
                                       float *outMatrix16);
 
+/** Set bone offset matrix (inverse bind pose, 4x4 row-major). */
+ASSIMP_API int vvSetBoneOffsetMatrix(C_STRUCT aiScene *scene,
+                                     unsigned int meshIndex,
+                                     unsigned int boneIndex,
+                                     const float *matrix16);
+
 /* ── Bone weight write ────────────────────────────────────────── */
 
 /**
@@ -195,6 +201,27 @@ ASSIMP_API int vvAddBlendShape(C_STRUCT aiScene *scene,
                                 const float *positions,
                                 const float *normals,
                                 float weight);
+
+/* ── Mesh subset extraction ──────────────────────────────────── */
+
+/**
+ * Extract a subset of a mesh, keeping only the specified vertices
+ * and faces that reference them.
+ *
+ * Rebuilds all per-vertex attributes (positions, normals, UVs,
+ * tangents, bitangents, vertex colors) and remaps bone weight
+ * vertex IDs.  Faces where ANY vertex is outside the keep set
+ * are removed.
+ *
+ * @param meshIndex       Target mesh index in the scene
+ * @param keepVertexIds   Sorted array of original vertex indices to keep
+ * @param numKeepVertices Number of entries in keepVertexIds
+ * @return 0 on success, -1 on error.
+ */
+ASSIMP_API int vvExtractMeshSubset(C_STRUCT aiScene *scene,
+                                    unsigned int meshIndex,
+                                    const unsigned int *keepVertexIds,
+                                    unsigned int numKeepVertices);
 
 #ifdef __cplusplus
 }
