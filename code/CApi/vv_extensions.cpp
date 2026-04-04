@@ -393,6 +393,48 @@ int vvAddBlendShape(aiScene *scene, unsigned int mi, const char *name,
     return (int)(newCount - 1);
 }
 
+/* ── Mesh data read ──────────────────────────────────────────── */
+
+unsigned int vvGetMeshNumVertices(const aiScene *scene, unsigned int mi) {
+    if (!scene || mi >= scene->mNumMeshes) return 0;
+    return scene->mMeshes[mi]->mNumVertices;
+}
+
+unsigned int vvGetMeshNumFaces(const aiScene *scene, unsigned int mi) {
+    if (!scene || mi >= scene->mNumMeshes) return 0;
+    return scene->mMeshes[mi]->mNumFaces;
+}
+
+unsigned int vvGetMeshVertices(const aiScene *scene, unsigned int mi, float *out) {
+    if (!scene || mi >= scene->mNumMeshes || !out) return 0;
+    const aiMesh *mesh = scene->mMeshes[mi];
+    if (!mesh || !mesh->mVertices) return 0;
+    for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
+        out[i * 3 + 0] = mesh->mVertices[i].x;
+        out[i * 3 + 1] = mesh->mVertices[i].y;
+        out[i * 3 + 2] = mesh->mVertices[i].z;
+    }
+    return mesh->mNumVertices;
+}
+
+int vvGetMeshFaces(const aiScene *scene, unsigned int mi,
+                   unsigned int *outIdx, unsigned int *outCount) {
+    if (!scene || mi >= scene->mNumMeshes || !outIdx || !outCount) return -1;
+    const aiMesh *mesh = scene->mMeshes[mi];
+    if (!mesh || !mesh->mFaces) return -1;
+    unsigned int written = 0;
+    for (unsigned int fi = 0; fi < mesh->mNumFaces; ++fi) {
+        const aiFace &f = mesh->mFaces[fi];
+        if (f.mNumIndices != 3) continue;  // skip non-triangles
+        outIdx[written * 3 + 0] = f.mIndices[0];
+        outIdx[written * 3 + 1] = f.mIndices[1];
+        outIdx[written * 3 + 2] = f.mIndices[2];
+        ++written;
+    }
+    *outCount = written;
+    return 0;
+}
+
 /* ── Mesh subset extraction ──────────────────────────────────── */
 
 int vvExtractMeshSubset(aiScene *scene, unsigned int mi,

@@ -202,6 +202,42 @@ ASSIMP_API int vvAddBlendShape(C_STRUCT aiScene *scene,
                                 const float *normals,
                                 float weight);
 
+/* ── Mesh data read ──────────────────────────────────────────── */
+
+/** Get the number of vertices in a mesh. */
+ASSIMP_API unsigned int vvGetMeshNumVertices(const C_STRUCT aiScene *scene,
+                                             unsigned int meshIndex);
+
+/** Get the number of faces in a mesh. */
+ASSIMP_API unsigned int vvGetMeshNumFaces(const C_STRUCT aiScene *scene,
+                                          unsigned int meshIndex);
+
+/**
+ * Copy vertex positions into a caller-provided float array.
+ *
+ * @param outPositions  Caller-allocated float array of size >= numVertices * 3
+ * @return Number of vertices written, or 0 on error.
+ */
+ASSIMP_API unsigned int vvGetMeshVertices(const C_STRUCT aiScene *scene,
+                                          unsigned int meshIndex,
+                                          float *outPositions);
+
+/**
+ * Copy face indices into caller-provided arrays.
+ *
+ * Each face is written as 3 unsigned ints (triangulated meshes) or
+ * variable-length (polygon meshes).  For simplicity, only triangles
+ * are supported: faces with != 3 indices are skipped.
+ *
+ * @param outIndices      Caller-allocated uint array of size >= numFaces * 3
+ * @param outNumWritten   Receives the number of triangles actually written
+ * @return 0 on success, -1 on error.
+ */
+ASSIMP_API int vvGetMeshFaces(const C_STRUCT aiScene *scene,
+                               unsigned int meshIndex,
+                               unsigned int *outIndices,
+                               unsigned int *outNumWritten);
+
 /* ── Mesh subset extraction ──────────────────────────────────── */
 
 /**
