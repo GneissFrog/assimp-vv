@@ -589,3 +589,139 @@ int vvExtractMeshSubset(aiScene *scene, unsigned int mi,
 
     return 0;
 }
+
+/* ── vvReplaceMeshData ────────────────────────────────────────── */
+
+int vvReplaceMeshData(aiScene *scene,
+                      unsigned int meshIndex,
+                      const float *positions,
+                      const float *uvs,
+                      unsigned int numNewVerts,
+                      const unsigned int *indices,
+                      unsigned int numNewFaces,
+                      const unsigned int *vmapping) {
+    if (!scene || !positions || !uvs || !indices || !vmapping)
+        return -1;
+    unsigned int nm = scene->mNumMeshes;
+    if (meshIndex >= nm)
+        return -1;
+
+    aiMesh *mesh = scene->mMeshes[meshIndex];
+    if (!mesh)
+        return -1;
+
+    // 1. Replace vertex positions
+    aiVector3D *newPos = new aiVector3D[numNewVerts];
+    for (unsigned int i = 0; i < numNewVerts; ++i) {
+        newPos[i].x = positions[i * 3];
+        newPos[i].y = positions[i * 3 + 1];
+        newPos[i].z = positions[i * 3 + 2];
+    }
+    mesh->mVertices = newPos;
+
+    // 2. Compute normals from the new faces
+    aiVector3D *newNormals = new aiVector3D[numNewVerts];
+    std::memset(newNormals, 0, numNewVerts * sizeof(aiVector3D));
+    for (unsigned int fi = 0; fi < numNewFaces; ++fi) {
+        unsigned int i0 = indices[fi * 3];
+        unsigned int i1 = indices[fi * 3 + 1];
+        unsigned int i2 = indices[fi * 3 + 2];
+        if (i0 >= numNewVerts || i1 >= numNewVerts || i2 >= numNewVerts)
+            continue;
+        aiVector3D e1 = newPos[i1] - newPos[i0];
+        aiVector3D e2 = newPos[i2] - newPos[i0];
+        aiVector3D n(e1.y * e2.z - e1.z * e2.y,
+                     e1.z * e2.x - e1.x * e2.z,
+                     e1.x * e2.y - e1.y * e2.x);
+        newNormals[i0] = newNormals[i0] + n;
+        newNormals[i1] = newNormals[i1] + n;
+        newNormals[i2] = newNormals[i2] + n;
+    }
+    for (unsigned int i = 0; i < numNewVerts; ++i) {
+        float len = std::sqrt(newNormals[i].x * newNormals[i].x +
+                              newNormals[i].y * newNormals[i].y +
+                              newNormals[i].z * newNormals[i].z);
+        if (len > 1e-10f) {
+            newNormals[i].x /= len;
+            newNormals[i].y /= len;
+            newNormals[i].z /= len;
+        }
+    }
+    mesh->mNormals = newNormals;
+
+    // 3. Clear tangents/bitangents (will be recomputed by loader if needed)
+    mesh->mTangents = nullptr;
+    mesh->mBitangents = nullptr;
+
+    // 4. Replace UV coordinates (channel 0)
+    aiVector3D *newUVs = new aiVector3D[numNewVerts];
+    for (unsigned int i = 0; i < numNewVerts; ++i) {
+        newUVs[i].x = uvs[i * 2];
+        newUVs[i].y = uvs[i * 2 + 1];
+        newUVs[i].z = 0.0f;
+    }
+    mesh->mTextureCoords[0] = newUVs;
+    mesh->mNumUVComponents[0] = 2;
+    // Clear other UV channels
+    for (int ch = 1; ch < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++ch) {
+        mesh->mTextureCoords[ch] = nullptr;
+        mesh->mNumUVComponents[ch] = 0;
+    }
+
+    // 5. Clear vertex colors
+    for (int ch = 0; ch < AI_MAX_NUMBER_OF_COLOR_SETS; ++ch)
+        mesh->mColors[ch] = nullptr;
+
+    // 6. Replace faces
+    aiFace *newFaces = new aiFace[numNewFaces];
+    for (unsigned int fi = 0; fi < numNewFaces; ++fi) {
+        newFaces[fi].mNumIndices = 3;
+        newFaces[fi].mIndices = new unsigned int[3];
+        newFaces[fi].mIndices[0] = indices[fi * 3];
+        newFaces[fi].mIndices[1] = indices[fi * 3 + 1];
+        newFaces[fi].mIndices[2] = indices[fi * 3 + 2];
+    }
+    mesh->mFaces = newFaces;
+
+    // 7. Remap bone weights through vmapping
+    // For each bone: new vertex i inherits the weight of original vertex vmapping[i]
+    for (unsigned int bi = 0; bi < mesh->mNumBones; ++bi) {
+        aiBone *bone = mesh->mBones[bi];
+
+        // Build a lookup from original vertex ID → weight
+        std::unordered_map<unsigned int, float> origWeights;
+        origWeights.reserve(bone->mNumWeights);
+        for (unsigned int wi = 0; wi < bone->mNumWeights; ++wi)
+            origWeights[bone->mWeights[wi].mVertexId] = bone->mWeights[wi].mWeight;
+
+        // Map through vmapping
+        std::vector<aiVertexWeight> remapped;
+        remapped.reserve(bone->mNumWeights * 2);  // may grow due to split verts
+        for (unsigned int newVI = 0; newVI < numNewVerts; ++newVI) {
+            unsigned int origVI = vmapping[newVI];
+            auto it = origWeights.find(origVI);
+            if (it != origWeights.end()) {
+                aiVertexWeight w;
+                w.mVertexId = newVI;
+                w.mWeight = it->second;
+                remapped.push_back(w);
+            }
+        }
+
+        delete[] bone->mWeights;
+        bone->mNumWeights = (unsigned int)remapped.size();
+        if (!remapped.empty()) {
+            bone->mWeights = new aiVertexWeight[remapped.size()];
+            std::memcpy(bone->mWeights, remapped.data(),
+                        remapped.size() * sizeof(aiVertexWeight));
+        } else {
+            bone->mWeights = nullptr;
+        }
+    }
+
+    // 8. Update counts
+    mesh->mNumVertices = numNewVerts;
+    mesh->mNumFaces = numNewFaces;
+
+    return 0;
+}

@@ -259,6 +259,33 @@ ASSIMP_API int vvExtractMeshSubset(C_STRUCT aiScene *scene,
                                     const unsigned int *keepVertexIds,
                                     unsigned int numKeepVertices);
 
+/* ── Mesh geometry replacement (Texturizer) ─────────────────── */
+
+/**
+ * Replace a mesh's geometry with new vertices, UVs, and faces,
+ * remapping bone weights through a vertex mapping array.
+ *
+ * Used by the Texturizer to swap in xatlas-unwrapped geometry
+ * while preserving the skeleton and animation data.
+ *
+ * @param meshIndex       Target mesh index in the scene
+ * @param positions       New vertex positions (numNewVerts × 3 floats)
+ * @param uvs             New UV coordinates (numNewVerts × 2 floats)
+ * @param numNewVerts     Number of new vertices
+ * @param indices         New triangle indices (numNewFaces × 3 uints)
+ * @param numNewFaces     Number of new triangles
+ * @param vmapping        Maps new vertex → original vertex (numNewVerts uints)
+ * @return 0 on success, -1 on error.
+ */
+ASSIMP_API int vvReplaceMeshData(C_STRUCT aiScene *scene,
+                                  unsigned int meshIndex,
+                                  const float *positions,
+                                  const float *uvs,
+                                  unsigned int numNewVerts,
+                                  const unsigned int *indices,
+                                  unsigned int numNewFaces,
+                                  const unsigned int *vmapping);
+
 #ifdef __cplusplus
 }
 #endif
