@@ -1138,6 +1138,8 @@ void FBXExporter::WriteObjects () {
         std::vector<std::vector<double>> uv_data;
         std::vector<std::vector<int32_t>> uv_indices;
 
+        size_t total_face_count = 0;
+
         indent = 2;
 
         for (uint32_t n_mi = 0; n_mi < node->mNumMeshes; n_mi++) {
@@ -1198,6 +1200,8 @@ void FBXExporter::WriteObjects () {
           }
 
           uniq_v_before_mi.push_back(static_cast<uint32_t>(uniq_v_before));
+
+          total_face_count += m->mNumFaces;
 
           if (m->HasNormals()) {
             normal_data.reserve(3 * polygon_data.size());
@@ -1290,6 +1294,26 @@ void FBXExporter::WriteObjects () {
 	    normals.End(outstream, binary, indent, true);
         }
 
+        // LayerElementSmoothing — ByPolygon, all faces in group 0 (flat / all-hard-edges).
+        // This is equivalent to Blender's "Face" smoothing export and eliminates the
+        // "no smoothing group" warning in Unreal Engine's FBX importer.
+        if (total_face_count > 0) {
+            FBX::Node smoothing("LayerElementSmoothing", int32_t(0));
+            smoothing.Begin(outstream, binary, indent);
+            smoothing.DumpProperties(outstream, binary, indent);
+            smoothing.EndProperties(outstream, binary, indent);
+            smoothing.BeginChildren(outstream, binary, indent);
+            indent = 3;
+            FBX::Node::WritePropertyNode("Version", int32_t(102), outstream, binary, indent);
+            FBX::Node::WritePropertyNode("Name", "", outstream, binary, indent);
+            FBX::Node::WritePropertyNode("MappingInformationType", "ByPolygon", outstream, binary, indent);
+            FBX::Node::WritePropertyNode("ReferenceInformationType", "Direct", outstream, binary, indent);
+            std::vector<int32_t> smoothing_data(total_face_count, 0);
+            FBX::Node::WritePropertyNode("Smoothing", smoothing_data, outstream, binary, indent);
+            indent = 2;
+            smoothing.End(outstream, binary, indent, true);
+        }
+
 	if (!color_data.empty()) {
 	    const auto colorChannelIndex = 0;
 	    FBX::Node vertexcolors("LayerElementColor", int32_t(colorChannelIndex));
@@ -1365,6 +1389,13 @@ void FBXExporter::WriteObjects () {
 		  le.AddChild("Type", "LayerElementNormal");
 		  le.AddChild("TypedIndex", int32_t(0));
 		  layer.AddChild(le);
+        }
+
+        if (total_face_count > 0) {
+          le = FBX::Node("LayerElement");
+          le.AddChild("Type", "LayerElementSmoothing");
+          le.AddChild("TypedIndex", int32_t(0));
+          layer.AddChild(le);
         }
 
 		if (!color_data.empty()) {

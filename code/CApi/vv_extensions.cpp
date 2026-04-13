@@ -619,7 +619,11 @@ int vvReplaceMeshData(aiScene *scene,
     }
     mesh->mVertices = newPos;
 
-    // 2. Compute normals from the new faces
+    // 2. Compute flat (hard-edge) normals — each triangle's vertices get
+    //    the face normal directly, producing sharp edges everywhere.
+    //    This is equivalent to Blender's "flat shade" / per-face normals
+    //    and writes proper normals that Unreal imports without the
+    //    "no smoothing group" warning.
     aiVector3D *newNormals = new aiVector3D[numNewVerts];
     std::memset(newNormals, 0, numNewVerts * sizeof(aiVector3D));
     for (unsigned int fi = 0; fi < numNewFaces; ++fi) {
@@ -633,19 +637,16 @@ int vvReplaceMeshData(aiScene *scene,
         aiVector3D n(e1.y * e2.z - e1.z * e2.y,
                      e1.z * e2.x - e1.x * e2.z,
                      e1.x * e2.y - e1.y * e2.x);
-        newNormals[i0] = newNormals[i0] + n;
-        newNormals[i1] = newNormals[i1] + n;
-        newNormals[i2] = newNormals[i2] + n;
-    }
-    for (unsigned int i = 0; i < numNewVerts; ++i) {
-        float len = std::sqrt(newNormals[i].x * newNormals[i].x +
-                              newNormals[i].y * newNormals[i].y +
-                              newNormals[i].z * newNormals[i].z);
+        float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
         if (len > 1e-10f) {
-            newNormals[i].x /= len;
-            newNormals[i].y /= len;
-            newNormals[i].z /= len;
+            n.x /= len;
+            n.y /= len;
+            n.z /= len;
         }
+        // Assign the face normal to all three vertices (flat shading)
+        newNormals[i0] = n;
+        newNormals[i1] = n;
+        newNormals[i2] = n;
     }
     mesh->mNormals = newNormals;
 
