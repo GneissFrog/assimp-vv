@@ -1229,10 +1229,20 @@ void FBXExporter::WriteObjects () {
           const auto num_uv = static_cast<size_t>(m->GetNumUVChannels());
           uv_indices.resize(std::max(num_uv, uv_indices.size()));
           uv_data.resize(std::max(num_uv, uv_data.size()));
-          std::map<aiVector3D, int32_t> index_by_uv;
 
-          // uvs, if any
+          // uvs, if any. The dedup map MUST be per-channel: if two UV
+          // channels share coordinate values, a shared map causes
+          // channel N's find() to return indices computed against
+          // channel N-1's uv_data, while channel N's own uv_data
+          // stays empty -- producing a LayerElementUV with empty UV
+          // array and non-empty UVIndex pointing into nothing. That
+          // file is malformed and Assimp's own importer rejects it
+          // with "index out of range" + drops the Geometry. Bug was
+          // pre-existing in upstream Assimp; surfaced when Sculptor's
+          // re-export went through this code path with multi-channel
+          // UV meshes.
           for (size_t uvi = 0; uvi < m->GetNumUVChannels(); uvi++) {
+            std::map<aiVector3D, int32_t> index_by_uv;
             const auto nc = m->mNumUVComponents[uvi];
             if (nc > 2) {
                 // FBX only supports 2-channel UV maps...
