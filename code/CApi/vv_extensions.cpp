@@ -5,6 +5,7 @@
 #include "vv_extensions.h"
 #include <assimp/scene.h>
 #include <assimp/mesh.h>
+#include <assimp/material.h>
 #include <cstring>
 #include <cstdlib>
 #include <string>
@@ -393,6 +394,26 @@ int vvAddBlendShape(aiScene *scene, unsigned int mi, const char *name,
     return (int)(newCount - 1);
 }
 
+unsigned int vvClearAnimMeshes(aiScene *scene) {
+    if (!scene) return 0;
+    unsigned int removed = 0;
+    for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi) {
+        aiMesh *mesh = scene->mMeshes[mi];
+        if (!mesh || mesh->mNumAnimMeshes == 0 || !mesh->mAnimMeshes) continue;
+        for (unsigned int i = 0; i < mesh->mNumAnimMeshes; ++i) {
+            // aiAnimMesh's destructor frees its mVertices / mNormals /
+            // mTangents / mBitangents / mColors / mTextureCoords arrays
+            // (see assimp/mesh.h). Use delete to invoke it.
+            delete mesh->mAnimMeshes[i];
+            ++removed;
+        }
+        delete[] mesh->mAnimMeshes;
+        mesh->mAnimMeshes = nullptr;
+        mesh->mNumAnimMeshes = 0;
+    }
+    return removed;
+}
+
 /* ── Mesh data read ──────────────────────────────────────────── */
 
 unsigned int vvGetMeshNumVertices(const aiScene *scene, unsigned int mi) {
@@ -724,5 +745,30 @@ int vvReplaceMeshData(aiScene *scene,
     mesh->mNumVertices = numNewVerts;
     mesh->mNumFaces = numNewFaces;
 
+    return 0;
+}
+
+/* ── vvSetMaterialDiffuseTexture ──────────────────────────────── */
+
+int vvSetMaterialDiffuseTexture(aiScene *scene,
+                                unsigned int meshIndex,
+                                const char *texturePath) {
+    if (!scene || !texturePath) return -1;
+    if (meshIndex >= scene->mNumMeshes) return -1;
+    aiMesh *mesh = scene->mMeshes[meshIndex];
+    if (!mesh) return -1;
+
+    unsigned int matIdx = mesh->mMaterialIndex;
+    if (matIdx >= scene->mNumMaterials) return -1;
+    aiMaterial *mat = scene->mMaterials[matIdx];
+    if (!mat) return -1;
+
+    aiString s(texturePath);
+    // Replace the legacy diffuse slot (FBX, classic OBJ/MTL importers,
+    // older Unreal versions) and the PBR base-color slot (glTF/USD,
+    // newer Unreal). AddProperty replaces an existing entry of the same
+    // (key, type, idx); both calls succeed even if only one slot exists.
+    mat->AddProperty(&s, AI_MATKEY_TEXTURE_DIFFUSE(0));
+    mat->AddProperty(&s, AI_MATKEY_TEXTURE(aiTextureType_BASE_COLOR, 0));
     return 0;
 }

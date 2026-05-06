@@ -202,6 +202,19 @@ ASSIMP_API int vvAddBlendShape(C_STRUCT aiScene *scene,
                                 const float *normals,
                                 float weight);
 
+/**
+ * Strip all morph targets (anim meshes) from every mesh in the scene.
+ *
+ * Each aiMesh's mAnimMeshes[] is freed and mNumAnimMeshes is set to 0.
+ * Used by the Skeleton upgrade tool to prevent Assimp's FBX exporter
+ * from emitting duplicate blend-shape channels (the import-export round
+ * trip otherwise produces "<name>" + "<name>.default" pairs in the
+ * output FBX).
+ *
+ * @return Number of anim meshes removed across the whole scene.
+ */
+ASSIMP_API unsigned int vvClearAnimMeshes(C_STRUCT aiScene *scene);
+
 /* ── Mesh data read ──────────────────────────────────────────── */
 
 /** Get the number of vertices in a mesh. */
@@ -285,6 +298,26 @@ ASSIMP_API int vvReplaceMeshData(C_STRUCT aiScene *scene,
                                   const unsigned int *indices,
                                   unsigned int numNewFaces,
                                   const unsigned int *vmapping);
+
+/* ── Material texture rewrite (Texturizer) ───────────────────── */
+
+/**
+ * Set the diffuse and PBR base-color texture path on the material
+ * referenced by ``meshIndex``.  Both legacy and PBR slots are written
+ * so importers across DCC tools (Blender, Maya, Unreal classic, glTF,
+ * USD) all see the new texture.
+ *
+ * The path is stored verbatim; pass a relative basename
+ * (e.g. ``"char_retextured.png"``) so the FBX is portable.
+ *
+ * @param meshIndex   Mesh whose material we're rewriting (uses
+ *                    mesh->mMaterialIndex internally).
+ * @param texturePath Null-terminated UTF-8 path/basename.
+ * @return 0 on success, -1 on error (bad indices, null inputs).
+ */
+ASSIMP_API int vvSetMaterialDiffuseTexture(C_STRUCT aiScene *scene,
+                                           unsigned int meshIndex,
+                                           const char *texturePath);
 
 #ifdef __cplusplus
 }
